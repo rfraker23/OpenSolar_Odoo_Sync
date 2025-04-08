@@ -8,12 +8,6 @@ def hello_world(request):
 
 @api_view(['POST'])
 def sync_odoo_projects(request):
-    # Replace these with your actual Odoo credentials
-    url = "https://sun-energy-partners-inc.odoo.com/"
-    db = "sun-energy-partners-inc"
-    username = "ryan.fraker@joinsunenergy.com"  # <- Your Odoo login email
-    api_token = "c956f25b438129602f8b77b47f1bee98bbd69737"  # <- Your API token
-
     try:
         common = xmlrpc.client.ServerProxy(f'{url}/xmlrpc/2/common')
         uid = common.authenticate(db, username, api_token, {})  # correct usage
