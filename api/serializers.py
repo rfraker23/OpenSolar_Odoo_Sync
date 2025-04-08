@@ -1,3 +1,4 @@
+
 from rest_framework import serializers
 
 class OpenSolarProjectSerializer(serializers.Serializer):

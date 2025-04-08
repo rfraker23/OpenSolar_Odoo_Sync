@@ -1,11 +1,28 @@
 from django.shortcuts import render
 from rest_framework.decorators import api_view
-from api.serializers import OpenSolarProjectSerializer
 from rest_framework.response import Response
 import xmlrpc.client
 import requests
 import os
 from dotenv import load_dotenv
+from api.serializers import OpenSolarProjectSerializer
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from api.serializers import OpenSolarProjectSerializer
+
+@api_view(['POST'])
+def validate_opensolar_project(request):
+    serializer = OpenSolarProjectSerializer(data=request.data)
+    if serializer.is_valid():
+        return Response({
+            "status": "valid",
+            "data": serializer.validated_data
+        })
+    else:
+        return Response({
+            "status": "invalid",
+            "errors": serializer.errors
+        }, status=400)
 
 # Load .env variables
 load_dotenv()

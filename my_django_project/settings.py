@@ -19,8 +19,7 @@ load_dotenv()
 OPENSOLAR_API_TOKEN = config('OPENSOLAR_API_TOKEN')
 ODOO_URL = config('ODOO_URL')
 ODOO_DB = config('ODOO_DB')
-ODOO_TOKEN = config('ODOO_TOKEN')
-
+ODOO_API_TOKEN = config("ODOO_API_TOKEN")  # ✅ This exists in your .env
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
