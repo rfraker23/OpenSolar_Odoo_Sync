@@ -32,6 +32,39 @@ odoo_username = os.getenv("ODOO_USERNAME")
 odoo_url = "https://sun-energy-partners-inc.odoo.com/"
 odoo_db = "sun-energy-partners-inc"
 
+@api_view(['GET'])
+def sync_projects_from_opensolar(request):
+    headers = {
+        'Authorization': f'Bearer {opensolar_token}',
+        'Content-Type': 'application/json',
+    }
+
+    url = "https://api.opensolar.com/v1/projects"
+
+    try:
+        response = requests.get(url, headers=headers)
+
+        if response.status_code != 200:
+            return Response({
+                "status": "error",
+                "message": f"OpenSolar API error: {response.status_code}",
+                "response": response.text
+            }, status=response.status_code)
+
+        projects = response.json()
+
+        # Optional: limit, filter, or sanitize here
+        return Response({
+            "status": "fetched",
+            "projects": projects
+        })
+
+    except Exception as e:
+        return Response({
+            "status": "error",
+            "message": str(e)
+        }, status=500)
+
 # 🧪 Test endpoint
 @api_view(['GET'])
 def hello_world(request):
@@ -76,6 +109,42 @@ def send_to_opensolar(request):
         return Response({"status": "sent", "response": response.json()})
     except Exception as e:
         return Response({"status": "error", "message": str(e)})
+    
+@api_view(['GET'])
+def opensolar_webhook_logs(request):
+    headers = {
+        'Authorization': f'Bearer {opensolar_token}',
+        'Content-Type': 'application/json',
+    }
+
+    org_id = os.getenv("OPENSOLAR_ORG_ID")
+    url = f"https://api.opensolar.com/api/orgs/{org_id}/webhook_process_logs/"
+
+    params = {
+        "limit": 10  # Optional: try paging
+    }
+
+    try:
+        response = requests.get(url, headers=headers, params=params)
+
+        if response.status_code != 200:
+            return Response({
+                "status": "error",
+                "message": f"OpenSolar API error: {response.status_code}",
+                "response": response.text
+            }, status=response.status_code)
+
+        return Response({
+            "status": "fetched",
+            "logs": response.json()
+        })
+
+    except Exception as e:
+        return Response({
+            "status": "error",
+            "message": str(e)
+        }, status=500)
+
 
 # ✅ Test OpenSolar Token
 @api_view(['GET'])
@@ -85,7 +154,7 @@ def test_opensolar_token(request):
         "Content-Type": "application/json"
     }
 
-    url = "https://api.opensolar.com/v1/projects"  # Or any valid test endpoint
+    url = "https://api.opensolar.com/api/v1/projects"  
 
     try:
         response = requests.get(url, headers=headers)

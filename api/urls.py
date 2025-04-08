@@ -4,7 +4,8 @@ from .views import (
     sync_odoo_projects,
     send_to_opensolar,
     test_opensolar_token,
-    validate_opensolar_project
+    validate_opensolar_project,
+    opensolar_webhook_logs,
 )
 
 urlpatterns = [
@@ -13,4 +14,5 @@ urlpatterns = [
     path('send-to-opensolar/', send_to_opensolar),
     path('test-opensolar/', test_opensolar_token),
     path('validate-project/', validate_opensolar_project),
+    path('opensolar-logs/', opensolar_webhook_logs),
 ]
