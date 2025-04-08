@@ -1,5 +1,6 @@
 from django.shortcuts import render
 from rest_framework.decorators import api_view
+from api.serializers import OpenSolarProjectSerializer
 from rest_framework.response import Response
 import xmlrpc.client
 import requests
@@ -71,11 +72,20 @@ def test_opensolar_token(request):
 
     try:
         response = requests.get(url, headers=headers)
-        return Response({
-            "status": "success",
-            "code": response.status_code,
-            "response": response.json()
-        })
+
+        # Check if the response is a valid JSON and if the status is OK
+        if response.status_code == 200:
+            return Response({
+                "status": "success",
+                "code": response.status_code,
+                "response": response.json()  # Parse the response as JSON
+            })
+        else:
+            return Response({
+                "status": "error",
+                "message": f"Error from OpenSolar API: {response.status_code} - {response.text}"
+            })
+
     except Exception as e:
         return Response({
             "status": "error",
