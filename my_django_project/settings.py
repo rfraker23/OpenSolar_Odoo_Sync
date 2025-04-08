@@ -12,6 +12,10 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 from pathlib import Path
 from decouple import config
+from dotenv import load_dotenv
+import os
+load_dotenv()
+
 OPENSOLAR_API_TOKEN = config('OPENSOLAR_API_TOKEN')
 ODOO_URL = config('ODOO_URL')
 ODOO_DB = config('ODOO_DB')
