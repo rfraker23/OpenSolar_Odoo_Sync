@@ -11,6 +11,15 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
+from decouple import config
+from dotenv import load_dotenv
+import os
+load_dotenv()
+
+OPENSOLAR_API_TOKEN = config('OPENSOLAR_API_TOKEN')
+ODOO_URL = config('ODOO_URL')
+ODOO_DB = config('ODOO_DB')
+ODOO_API_TOKEN = config("ODOO_API_TOKEN")  # ✅ This exists in your .env
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -37,6 +46,8 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'rest_framework',
+    'api',
 ]
 
 MIDDLEWARE = [
