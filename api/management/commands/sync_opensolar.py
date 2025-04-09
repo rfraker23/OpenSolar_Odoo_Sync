@@ -9,9 +9,9 @@ class Command(BaseCommand):
 
     def handle(self, *args, **kwargs):
         token = config("OPENSOLAR_API_TOKEN")
-        org_id = config("OPENSOLAR_ORG_ID")  # ← This MUST come before the next line
+        org_id = config("OPENSOLAR_ORG_ID")  
 
-        url = f"https://api.opensolar.com/api/orgs/{org_id}/projects/"  # Now org_id is defined
+        url = f"https://api.opensolar.com/api/orgs/{org_id}/projects/"  
 
         headers = {
             "Authorization": f"Bearer {token}",
