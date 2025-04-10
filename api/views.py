@@ -150,8 +150,8 @@ def opensolar_webhook_logs(request):
 @api_view(['GET'])
 def test_opensolar_token(request):
     headers = {
-        "Authorization": f"Bearer {opensolar_token}",
-        "Content-Type": "application/json"
+    "Authorization": f"Bearer {settings.OPENSOLAR_API_TOKEN}",
+    "Content-Type": "application/json"
     }
 
     url = "https://api.opensolar.com/api/v1/projects"  
