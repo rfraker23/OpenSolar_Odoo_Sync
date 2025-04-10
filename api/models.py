@@ -18,7 +18,13 @@ class OpenSolarProject(models.Model):
     external_id = models.CharField(max_length=100, unique=True)
     name = models.CharField(max_length=255)
     status = models.CharField(max_length=100, null=True, blank=True)
-    customer = models.ForeignKey(OpenSolarCustomer, on_delete=models.CASCADE, related_name='projects')
+    customer = models.ForeignKey(
+    OpenSolarCustomer,
+    on_delete=models.SET_NULL,
+    null=True,          # ✅ allows blank values in the DB
+    blank=True,         # ✅ allows blank in admin/forms
+    related_name='projects'
+)
     created_at = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
     project_type = models.CharField(max_length=100, null=True, blank=True)
