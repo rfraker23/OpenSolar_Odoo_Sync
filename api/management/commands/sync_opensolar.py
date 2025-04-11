@@ -1,65 +1,26 @@
 from django.core.management.base import BaseCommand
-from api.models import OpenSolarProject, OpenSolarCustomer, OpenSolarProposal
+from api.models import (
+    OpenSolarProject,
+    OpenSolarCustomer,
+    OpenSolarModule,
+    OpenSolarInverter,
+    OpenSolarBattery,
+)
 import requests
 from decouple import config
-
-
-def fetch_all_proposals_from_webhooks(org_id, headers):
-    url = f"https://api.opensolar.com/api/orgs/{org_id}/webhook_process_logs/"
-    try:
-        response = requests.get(url, headers=headers)
-        response.raise_for_status()
-        print("🧪 Full webhook log data:", response.json())
-        return response.json()
-    except requests.RequestException as e:
-        print(f"❌ Error fetching webhook proposals: {e}")
-        return []
-
-
-
-def sync_all_proposals(org_id, headers):
-    proposals = fetch_all_proposals_from_webhooks(org_id, headers)
-    print(f"📦 Webhook proposals fetched: {len(proposals)}")
-
-    for entry in proposals:
-        payload = entry.get("payload", {})
-        if not payload or "id" not in payload:
-            continue
-
-        project_id = payload.get("project")
-        try:
-            project = OpenSolarProject.objects.get(external_id=project_id)
-        except OpenSolarProject.DoesNotExist:
-            print(f"⚠ Skipping proposal {payload.get('id')} — project {project_id} not found")
-            continue
-
-        OpenSolarProposal.objects.update_or_create(
-            external_id=payload["id"],
-            defaults={
-                "project": project,
-                "title": payload.get("title", "Untitled"),
-                "pdf_url": payload.get("pdf_url"),
-                "created_at": payload.get("created_at"),
-                "system_size_kw": payload.get("kw_stc"),
-                "system_output_kwh": payload.get("output_annual_kwh"),
-                "price": payload.get("price_excluding_tax"),
-                "battery_size_kwh": payload.get("battery_total_kwh"),
-            }
-        )
-        print(f"✅ Synced proposal: {payload.get('title', 'Untitled')}")
+import traceback
 
 
 class Command(BaseCommand):
-    help = 'Syncs project and customer data from OpenSolar API'
+    help = 'Sync projects, customers, and system details from OpenSolar'
 
     def handle(self, *args, **kwargs):
         token = config("OPENSOLAR_API_TOKEN")
         org_id = config("OPENSOLAR_ORG_ID")
-
         base_url = f"https://api.opensolar.com/api/orgs/{org_id}"
         headers = {
             "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
 
         try:
@@ -68,26 +29,29 @@ class Command(BaseCommand):
             projects = response.json()
 
             for proj in projects:
-                contacts = proj.get("contacts_data", [])
-                contact = contacts[0] if contacts else None
+                # Customer Sync
+                contacts = proj.get("contacts_data")
+            customer = None
 
-                customer = None
-                if contact and "id" in contact:
-                    full_name = contact.get("display") or f"{contact.get('first_name', '')} {contact.get('family_name', '')}"
+            if contacts and contacts[0].get("id"):
+                contact = contacts[0]
+                customer, _ = OpenSolarCustomer.objects.update_or_create(
+                    external_id=contact["id"],
+                    defaults={
+                        "name": contact.get("display") or "No Name",
+                        "email": contact.get("email", ""),
+                        "phone": contact.get("phone", ""),
+                        "address": proj.get("address", ""),
+                        "city": proj.get("locality", ""),
+                        "state": proj.get("state", ""),
+                        "zip_code": proj.get("zip", ""),
+                    },
+                )
+            else:
+                print(f"⚠️ No customer data found for project {proj.get('title')}, skipping customer sync.")
 
-                    customer, _ = OpenSolarCustomer.objects.update_or_create(
-                        external_id=contact["id"],
-                        defaults={
-                            "name": full_name.strip(),
-                            "email": contact.get("email", ""),
-                            "phone": contact.get("phone", ""),
-                            "address": proj.get("address", ""),
-                            "city": proj.get("locality", ""),
-                            "state": proj.get("state", ""),
-                            "zip_code": proj.get("zip", "")
-                        }
-                    )
 
+                # Project Sync
                 project_obj, _ = OpenSolarProject.objects.update_or_create(
                     external_id=proj["id"],
                     defaults={
@@ -95,18 +59,67 @@ class Command(BaseCommand):
                         "status": str(proj.get("stage", "")),
                         "customer": customer,
                         "created_at": proj.get("created_date"),
-                        "project_type": "Residential" if proj.get("is_residential") else "Commercial"
-                    }
+                        "project_type": "Residential" if proj.get("is_residential") else "Commercial",
+                        "share_link": proj.get("share_link"),
+                    },
                 )
 
-                print("✅ Saving project:", proj.get("title"), "| Stage:", proj.get("stage"))
+                # Fetching System Details (Corrected)
+                system_resp = requests.get(f"{base_url}/projects/{proj['id']}/systems/details/", headers=headers)
+                system_resp.raise_for_status()
+                system_data = system_resp.json()
 
-            # ✅ NEW: Sync proposals from webhook logs
-            sync_all_proposals(org_id, headers)
+                systems = system_data.get("systems", [])
+                if systems:
+                    system = systems[0]  # primary system details
+                    project_obj.system_size_kw = system.get("kw_stc")
+                    project_obj.price = system.get("basicPriceOverride")
+                    project_obj.battery_size_kwh = system.get("battery_total_kwh")
+                    project_obj.system_output_kwh = system.get("output_annual_kwh")
+                    project_obj.save()
 
-            self.stdout.write(self.style.SUCCESS(f"✅ Synced {len(projects)} projects from OpenSolar."))
+                    # Clear existing related system components
+                    project_obj.modules.all().delete()
+                    project_obj.inverters.all().delete()
+                    project_obj.batteries.all().delete()
+
+                    # Save Modules
+                    for module in system.get("modules", []):
+                        OpenSolarModule.objects.create(
+                            project=project_obj,
+                            manufacturer_name=module["manufacturer_name"],
+                            code=module["code"],
+                            quantity=module["quantity"],
+                        )
+
+                    # Save Inverters
+                    for inverter in system.get("inverters", []):
+                        OpenSolarInverter.objects.create(
+                            project=project_obj,
+                            manufacturer_name=inverter["manufacturer_name"],
+                            code=inverter["code"],
+                            quantity=inverter["quantity"],
+                        )
+
+                    # Save Batteries
+                    for battery in system.get("batteries", []):
+                        OpenSolarBattery.objects.create(
+                            project=project_obj,
+                            manufacturer_name=battery["manufacturer_name"],
+                            code=battery["code"],
+                            quantity=battery["quantity"],
+                        )
+
+                    print(f"✅ Synced system details for project: {project_obj.name}")
+
+                else:
+                    print(f"⚠️ No system data for project: {project_obj.name}")
+
+            self.stdout.write(self.style.SUCCESS(f"✅ Successfully synced {len(projects)} projects from OpenSolar."))
 
         except requests.RequestException as e:
-            self.stderr.write(self.style.ERROR(f"❌ API error: {str(e)}"))
+            self.stderr.write(self.style.ERROR(f"❌ API Request Error: {e}"))
+            traceback.print_exc()
         except Exception as e:
-            self.stderr.write(self.style.ERROR(f"❌ Sync failed: {str(e)}"))
+            self.stderr.write(self.style.ERROR(f"❌ General Sync Error: {e}"))
+            traceback.print_exc()
