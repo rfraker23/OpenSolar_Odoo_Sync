@@ -25,10 +25,12 @@ class Command(BaseCommand):
         }
 
         try:
+            # Fetch all projects
             response = requests.get(f"{base_url}/projects/", headers=headers)
             response.raise_for_status()
             projects = response.json()
 
+            # Iterate through each project and sync its data
             for proj in projects:
                 project_id = proj["id"]
 
@@ -66,11 +68,10 @@ class Command(BaseCommand):
                         "customer": customer,
                         "created_at": proj.get("created_date"),
                         "project_type": "Residential" if proj.get("is_residential") else "Commercial",
-                        "share_link": share_link,
+                        "share_link": share_link,  # Using share_link here
                     },
                 )
 
-                # Proposals (if embedded)
                 proposals = full_proj_data.get("proposals", [])
                 for proposal in proposals:
                     proposal_obj, _ = OpenSolarProposal.objects.update_or_create(
@@ -88,50 +89,64 @@ class Command(BaseCommand):
                     )
                     print(f"📄 Synced proposal for: {project_obj.name}")
 
-                # Fetch System Details
-                system_resp = requests.get(f"{base_url}/projects/{proj['id']}/systems/details/", headers=headers)
-                system_resp.raise_for_status()
-                system_data = system_resp.json()
-                systems = system_data.get("systems", [])
+                systems_resp = requests.get(
+                    f"{base_url}/systems/",
+                    headers=headers,
+                    params={"project": project_id, "fieldset": "list", "page": 1, "limit": 10}
+                )
+                systems_resp.raise_for_status()
+                systems_data = systems_resp.json()
 
-                if systems:
-                    system = systems[0]
-                    project_obj.system_size_kw = system.get("kw_stc")
-                    project_obj.price = system.get("basicPriceOverride")
-                    project_obj.battery_size_kwh = system.get("battery_total_kwh")
-                    project_obj.system_output_kwh = system.get("output_annual_kwh")
-                    project_obj.save()
+                if systems_data:
+                    for system in systems_data:
+                        print("System data:", system)  # Check if price_including_tax exists in the response
+                        
+                        if project_obj.price is None:  # Only update price if it is not manually set
+                            price_from_system = system.get("price_including_tax", None)  # Use price_including_tax field
+                            if price_from_system:
+                                project_obj.price = price_from_system
+                                print(f"✅ Price updated for project {project_obj.name} from system data: {price_from_system}")
+                            else:
+                                print(f"⚠️ No price found for system in project {project_obj.name}.")
+                        else:
+                            print(f"⚠️ Price for project {project_obj.name} is manually overridden. Keeping the manual price: {project_obj.price}")
 
-                    # Clear old related items
-                    project_obj.modules.all().delete()
-                    project_obj.inverters.all().delete()
-                    project_obj.batteries.all().delete()
+                        project_obj.system_size_kw = system.get("kw_stc")
+                        project_obj.battery_size_kwh = system.get("battery_total_kwh")
+                        project_obj.system_output_kwh = system.get("output_annual_kwh")
 
-                    for module in system.get("modules", []):
-                        OpenSolarModule.objects.create(
-                            project=project_obj,
-                            manufacturer_name=module["manufacturer_name"],
-                            code=module["code"],
-                            quantity=module["quantity"],
-                        )
+                        project_obj.save()
+                        print(f"✅ Saved updated price for project {project_obj.name}: {project_obj.price}")
 
-                    for inverter in system.get("inverters", []):
-                        OpenSolarInverter.objects.create(
-                            project=project_obj,
-                            manufacturer_name=inverter["manufacturer_name"],
-                            code=inverter["code"],
-                            quantity=inverter["quantity"],
-                        )
+                        project_obj.modules.all().delete()
+                        project_obj.inverters.all().delete()
+                        project_obj.batteries.all().delete()
 
-                    for battery in system.get("batteries", []):
-                        OpenSolarBattery.objects.create(
-                            project=project_obj,
-                            manufacturer_name=battery["manufacturer_name"],
-                            code=battery["code"],
-                            quantity=battery["quantity"],
-                        )
+                        for module in system.get("modules", []):
+                            OpenSolarModule.objects.create(
+                                project=project_obj,
+                                manufacturer_name=module["manufacturer_name"],
+                                code=module["code"],
+                                quantity=module["quantity"],
+                            )
 
-                    print(f"✅ Synced system details for project: {project_obj.name}")
+                        for inverter in system.get("inverters", []):
+                            OpenSolarInverter.objects.create(
+                                project=project_obj,
+                                manufacturer_name=inverter["manufacturer_name"],
+                                code=inverter["code"],
+                                quantity=inverter["quantity"],
+                            )
+
+                        for battery in system.get("batteries", []):
+                            OpenSolarBattery.objects.create(
+                                project=project_obj,
+                                manufacturer_name=battery["manufacturer_name"],
+                                code=battery["code"],
+                                quantity=battery["quantity"],
+                            )
+
+                        print(f"✅ Synced system details for project: {project_obj.name} from system {system.get('id')}")
                 else:
                     print(f"⚠️ No system data for project: {project_obj.name}")
 
