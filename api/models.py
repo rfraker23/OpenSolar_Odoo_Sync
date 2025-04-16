@@ -65,3 +65,4 @@ class OpenSolarBattery(models.Model):
     code = models.CharField(max_length=255)
     quantity = models.PositiveIntegerField()
 
+
