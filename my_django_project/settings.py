@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
+    'django_crontab',
     'api',  # Your custom app for OpenSolar integration
 ]
 
@@ -81,6 +82,19 @@ AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
     {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
     {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
+]
+
+CRONJOBS = [
+    # every hour on the hour, run your sync_projects_to_odoo command
+    (
+        '0 * * * *',
+        'django.core.management.call_command',
+        ['sync_projects_to_odoo'],
+        {
+            # if you have a custom settings module for staging/prod, point to it:
+            # 'settings': 'your_project.settings.production'
+        }
+    ),
 ]
 
 # Localization settings
