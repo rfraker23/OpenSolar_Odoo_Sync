@@ -5,24 +5,38 @@ from api.models import OpenSolarProject
 import requests
 from decouple import config
 
-# ─── Odoo JSON‐RPC settings ───
+# ─── Odoo JSON-RPC settings ───────────────────────────────────────────────
 ODOO_URL      = config("ODOO_URL")
 ODOO_DB       = config("ODOO_DB")
 ODOO_USERNAME = config("ODOO_API_USERNAME")
 ODOO_PASSWORD = config("ODOO_API_TOKEN")
 ODOO_RPC      = f"{ODOO_URL}/jsonrpc"
 
-# ─── Your Studio‑fields on x_projects ───
-FIELD_PROJECT_NAME       = "x_name"                          # holds customer name
-FIELD_PARTNER_ID         = "x_studio_partner_id"
-FIELD_EXTERNAL_ID        = "x_studio_opensolar_external_id"
-FIELD_PROPOSAL_LINK      = "x_studio_open_solar_proposal"
-FIELD_VALUE              = "x_studio_value"
-FIELD_CHANGE_ORDER_PRICE = "x_studio_change_order_price"
-FIELD_SYS_SIZE           = "x_studio_system_size_kw_1"       # new float field
+# ─── x_projects field names ───────────────────────────────────────────────
+F_NAME       = "x_name"
+F_PARTNER    = "x_studio_partner_id"
+F_EXT_ID     = "x_studio_opensolar_external_id"
+F_PROPOSAL   = "x_studio_open_solar_proposal"
+F_VALUE      = "x_studio_value"
+F_CHANGE     = "x_studio_change_order_price"
+F_SYS_SIZE   = "x_studio_system_size_kw_1"
+
+# ─── Flattened component fields on x_projects ─────────────────────────────
+F_MOD_MAN    = "x_studio_module_manufacturer_name"
+F_MOD_TYPE   = "x_studio_module_type"
+F_MOD_QTY    = "x_studio_module_qty"
+
+F_INV_MAN    = "x_studio_inverter_manufacturer_name"
+F_INV_TYPE   = "x_studio_inverter_type"
+F_INV_QTY    = "x_studio_inverter_qty"
+
+F_BAT_MAN    = "x_studio_battery_manufacturer_name"
+F_BAT_TYPE   = "x_studio_battery_type"
+F_BAT_QTY    = "x_studio_battery_quantity"
+
 
 class Command(BaseCommand):
-    help = "Sync OpenSolarProject → Odoo x_projects (dedupe on External ID OR customer name)"
+    help = "Sync OpenSolarProject → Odoo x_projects (incl. first Module/Inverter/Battery)"
 
     def handle(self, *args, **kwargs):
         uid      = self._authenticate()
@@ -30,74 +44,106 @@ class Command(BaseCommand):
         self.stdout.write(f"\n🔎  {projects.count()} projects in Django\n")
 
         for proj in projects:
-            # ——— extract all source values early ———
-            ext_id      = int(proj.external_id)
-            share       = proj.share_link or ""
-            price       = float(proj.price) if proj.price is not None else 0.0
-            system_size = float(proj.system_size_kw or 0.0)   # <— here’s your system size
-            cust        = proj.customer
+            ext_id   = int(proj.external_id)
+            share    = proj.share_link or ""
+            price    = float(proj.price or 0.0)
+            sys_size = float(proj.system_size_kw or 0.0)
+            cust     = proj.customer
 
-            # ——— logging ———
-            self.stdout.write(f"➡️  OS#{ext_id} – customer: {cust.name}")
-            self.stdout.write(f"   🔗 share_link: {share!r}")
-            self.stdout.write(f"   💲 price:      {price!r}")
-            self.stdout.write(f"   📏 sys_size:   {system_size!r}")
+            self.stdout.write(
+                f"➡️  OS#{ext_id} – customer: {cust.name}\n"
+                f"   🔗 share_link: {share!r}\n"
+                f"   💲 price:      {price!r}\n"
+                f"   📏 sys_size:   {sys_size!r}"
+            )
 
             if not share:
                 self.stdout.write("   ‼️  SKIP: no share_link\n")
                 continue
 
-            # ——— find the partner in Odoo (by ext_id or email) ———
-            partner_domain = [
-                "|",
-                [FIELD_EXTERNAL_ID, "=", cust.external_id],
-                ["email",           "=", cust.email or False]
-            ]
-            part = self._search_read(uid, "res.partner", partner_domain, ["id", "name"])
-            if not part:
-                self.stderr.write(f"   ❌  No Odoo contact for {cust.external_id}/{cust.email}\n")
+            # ─── Find or skip partner in Odoo
+            partner = self._search_read(
+                uid, "res.partner",
+                ["|", 
+                    [F_EXT_ID, "=", ext_id],
+                    ["email", "=", cust.email or False]
+                ],
+                ["id","name"]
+            )
+            if not partner:
+                self.stderr.write(f"   ❌ No Odoo contact for {cust.name} ({cust.email})\n")
                 continue
-            pid = part[0]["id"]
-            self.stdout.write(f"   👤  partner #{pid}: {part[0]['name']}")
+            pid = partner[0]["id"]
+            self.stdout.write(f"   👤 partner #{pid}: {partner[0]['name']}")
 
-            # ——— build your payload ———
+            # ─── Build project vals
             vals = {
-                FIELD_PROJECT_NAME:       cust.name,
-                FIELD_PARTNER_ID:         pid,
-                FIELD_EXTERNAL_ID:        ext_id,
-                FIELD_PROPOSAL_LINK:      share,
-                FIELD_VALUE:              price,
-                FIELD_CHANGE_ORDER_PRICE: price,
-                FIELD_SYS_SIZE:           system_size,
+                F_NAME:     cust.name,
+                F_PARTNER:  pid,
+                F_EXT_ID:   ext_id,
+                F_PROPOSAL: share,
+                F_VALUE:    price,
+                F_CHANGE:   price,
+                F_SYS_SIZE: sys_size,
             }
+
+            # ─── Flatten first Module
+            first_mod = proj.modules.first()
+            if first_mod:
+                vals.update({
+                    F_MOD_MAN:  first_mod.manufacturer_name,
+                    F_MOD_TYPE: first_mod.code,
+                    F_MOD_QTY:  first_mod.quantity,
+                })
+
+            # ─── Flatten first Inverter
+            first_inv = proj.inverters.first()
+            if first_inv:
+                vals.update({
+                    F_INV_MAN:  first_inv.manufacturer_name,
+                    F_INV_TYPE: first_inv.code,
+                    F_INV_QTY:  first_inv.quantity,
+                })
+
+            # ─── Flatten first Battery
+            first_bat = proj.batteries.first()
+            if first_bat:
+                vals.update({
+                    F_BAT_MAN:  first_bat.manufacturer_name,
+                    F_BAT_TYPE: first_bat.code,
+                    F_BAT_QTY:  first_bat.quantity,
+                })
+
             self.stdout.write(f"   [DEBUG] payload → {vals}")
 
-            # ——— dedupe on External ID OR customer name ———
-            search_domain = [
-                "|",
-                [FIELD_EXTERNAL_ID, "=", ext_id],
-                [FIELD_PROJECT_NAME,  "=", cust.name],
-            ]
-            self.stdout.write(f"   [DEBUG] x_projects search domain → {search_domain}")
-            existing = self._search_read(uid, "x_projects", search_domain, ["id"])
-            self.stdout.write(f"   [DEBUG] x_projects search → {existing}")
+            # ─── Dedupe on (external_id, customer_name)
+            existing = self._search_read(
+                uid, "x_projects",
+                ["|",
+                    [F_EXT_ID, "=", ext_id],
+                    [F_NAME,  "=", cust.name]
+                ],
+                ["id"]
+            )
 
             if existing:
-                rec_id = existing[0]["id"]
-                self.stdout.write(f"   ✏️  Updating x_projects #{rec_id}")
-                self._write(uid, "x_projects", rec_id, vals)
+                prj_id = existing[0]["id"]
+                self.stdout.write(f"   ✏️  Updating x_projects #{prj_id}")
+                self._write(uid, "x_projects", prj_id, vals)
             else:
-                new_id = self._create(uid, "x_projects", vals)
-                self.stdout.write(self.style.SUCCESS(f"   🆕 Created x_projects #{new_id}\n"))
+                prj_id = self._create(uid, "x_projects", vals)
+                self.stdout.write(self.style.SUCCESS(f"   🆕 Created x_projects #{prj_id}"))
 
-        self.stdout.write(self.style.SUCCESS("✅  Sync complete\n"))
+            self.stdout.write("")  # blank line
+
+        self.stdout.write(self.style.SUCCESS("✅ Full sync complete\n"))
 
 
-    # ─── JSON‑RPC helpers ───
+    # ─── JSON-RPC helpers ────────────────────────────────────────────────
     def _rpc(self, payload):
         resp = requests.post(ODOO_RPC, json=payload).json()
         if "error" in resp:
-            raise RuntimeError(resp["error"]["message"])
+            raise RuntimeError(resp["error"]["data"]["message"])
         return resp.get("result", [])
 
     def _authenticate(self):
