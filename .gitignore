@@ -1,9 +1,11 @@
-# Python
+# Byte-compiled
 __pycache__/
 *.py[cod]
-*.sqlite3
 
-# Django
+# Virtualenv
+venv/
+
+# Django files
 *.log
 *.pot
 *.pyc
@@ -11,12 +13,10 @@ __pycache__/
 *.db
 db.sqlite3
 
-# Environment
+# Environment settings
 .env
-venv/
-.env.*
 
-# VSCode
+# VSCode settings
 .vscode/
 
 # macOS
