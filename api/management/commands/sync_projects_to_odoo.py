@@ -5,14 +5,14 @@ from api.models import OpenSolarProject
 import requests
 from decouple import config
 
-# ─── Odoo JSON-RPC settings ───────────────────────────────────────────────
+# ─── Odoo JSON-RPC settings ─────────────────────────────────────────────────
 ODOO_URL      = config("ODOO_URL")
 ODOO_DB       = config("ODOO_DB")
 ODOO_USERNAME = config("ODOO_API_USERNAME")
 ODOO_PASSWORD = config("ODOO_API_TOKEN")
 ODOO_RPC      = f"{ODOO_URL}/jsonrpc"
 
-# ─── x_projects field names ───────────────────────────────────────────────
+# ─── x_projects field names ────────────────────────────────────────────────
 F_NAME       = "x_name"
 F_PARTNER    = "x_studio_partner_id"
 F_EXT_ID     = "x_studio_opensolar_external_id"
@@ -21,7 +21,6 @@ F_VALUE      = "x_studio_value"
 F_CHANGE     = "x_studio_change_order_price"
 F_SYS_SIZE   = "x_studio_system_size_kw_1"
 
-# ─── Flattened component fields on x_projects ─────────────────────────────
 F_MOD_MAN    = "x_studio_module_manufacturer_name"
 F_MOD_TYPE   = "x_studio_module_type"
 F_MOD_QTY    = "x_studio_module_qty"
@@ -44,6 +43,13 @@ class Command(BaseCommand):
         self.stdout.write(f"\n🔎  {projects.count()} projects in Django\n")
 
         for proj in projects:
+            # ─── GUARD: skip any project with no customer linked
+            if not proj.customer:
+                self.stderr.write(
+                    f"   ❌  SKIP: no customer linked for project external_id={proj.external_id}\n\n"
+                )
+                continue
+
             ext_id   = int(proj.external_id)
             share    = proj.share_link or ""
             price    = float(proj.price or 0.0)
@@ -58,21 +64,24 @@ class Command(BaseCommand):
             )
 
             if not share:
-                self.stdout.write("   ‼️  SKIP: no share_link\n")
+                self.stdout.write("   ‼️  SKIP: no share_link\n\n")
                 continue
 
             # ─── Find or skip partner in Odoo
             partner = self._search_read(
                 uid, "res.partner",
-                ["|", 
+                ["|",
                     [F_EXT_ID, "=", ext_id],
-                    ["email", "=", cust.email or False]
+                    ["email", "=", cust.email or False],
                 ],
                 ["id","name"]
             )
             if not partner:
-                self.stderr.write(f"   ❌ No Odoo contact for {cust.name} ({cust.email})\n")
+                self.stderr.write(
+                    f"   ❌  No Odoo contact for {cust.name} ({cust.email})\n\n"
+                )
                 continue
+
             pid = partner[0]["id"]
             self.stdout.write(f"   👤 partner #{pid}: {partner[0]['name']}")
 
@@ -121,7 +130,7 @@ class Command(BaseCommand):
                 uid, "x_projects",
                 ["|",
                     [F_EXT_ID, "=", ext_id],
-                    [F_NAME,  "=", cust.name]
+                    [F_NAME,  "=", cust.name],
                 ],
                 ["id"]
             )
@@ -132,14 +141,16 @@ class Command(BaseCommand):
                 self._write(uid, "x_projects", prj_id, vals)
             else:
                 prj_id = self._create(uid, "x_projects", vals)
-                self.stdout.write(self.style.SUCCESS(f"   🆕 Created x_projects #{prj_id}"))
+                self.stdout.write(
+                    self.style.SUCCESS(f"   🆕 Created x_projects #{prj_id}")
+                )
 
             self.stdout.write("")  # blank line
 
         self.stdout.write(self.style.SUCCESS("✅ Full sync complete\n"))
 
 
-    # ─── JSON-RPC helpers ────────────────────────────────────────────────
+    # ─── JSON-RPC helpers ────────────────────────────────────────────────────
     def _rpc(self, payload):
         resp = requests.post(ODOO_RPC, json=payload).json()
         if "error" in resp:
@@ -148,11 +159,11 @@ class Command(BaseCommand):
 
     def _authenticate(self):
         return self._rpc({
-            "jsonrpc":"2.0","method":"call",
+            "jsonrpc":"2.0", "method":"call",
             "params":{
                 "service":"common","method":"login",
                 "args":[ODOO_DB,ODOO_USERNAME,ODOO_PASSWORD]
-            },"id":1
+            }, "id":1
         })
 
     def _search_read(self, uid, model, domain, fields):
@@ -164,7 +175,7 @@ class Command(BaseCommand):
                     ODOO_DB, uid, ODOO_PASSWORD,
                     model, "search_read",
                     [domain],
-                    {"fields": fields, "limit": 1}
+                    {"fields":fields,"limit":1}
                 ]
             },"id":2
         }) or []
@@ -176,8 +187,7 @@ class Command(BaseCommand):
                 "service":"object","method":"execute_kw",
                 "args":[
                     ODOO_DB, uid, ODOO_PASSWORD,
-                    model, "create",
-                    [vals]
+                    model, "create",[vals]
                 ]
             },"id":3
         })
@@ -189,8 +199,7 @@ class Command(BaseCommand):
                 "service":"object","method":"execute_kw",
                 "args":[
                     ODOO_DB, uid, ODOO_PASSWORD,
-                    model, "write",
-                    [[rec_id], vals]
+                    model, "write",[[rec_id],vals]
                 ]
             },"id":4
         })
