@@ -1,8 +1,5 @@
 @echo off
-REM activate your venv
-call C:\Users\seadmin\DJANGO2025\venv\Scripts\activate.bat
-
-REM run the three management commands in sequence
-python manage.py sync_opensolar
-python manage.py sync_contacts_to_odoo
-python manage.py sync_projects_to_odoo
+REM Activate venv (if you need to)
+REM call "C:\Users\seadmin\OpenSolar Odoo API\venv\Scripts\activate.bat"
+REM Run the sync_all management command
+"C:\Users\seadmin\OpenSolar Odoo API\venv\Scripts\python.exe" "%~dp0manage.py" sync_all
