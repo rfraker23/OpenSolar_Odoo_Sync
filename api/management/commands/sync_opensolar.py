@@ -1,6 +1,14 @@
 # api/management/commands/sync_opensolar.py
 
+import time
+import json
+import traceback
+import requests
+
+from functools import wraps
 from django.core.management.base import BaseCommand
+from decouple import config
+
 from api.models import (
     OpenSolarProject,
     OpenSolarCustomer,
@@ -9,10 +17,22 @@ from api.models import (
     OpenSolarInverter,
     OpenSolarBattery,
 )
-import requests
-from decouple import config
-import json
-import traceback
+
+
+def rate_limiter(calls_per_minute):
+    interval = 60.0 / calls_per_minute
+    def decorator(fn):
+        last = {"ts": 0.0}
+        @wraps(fn)
+        def wrapped(*args, **kwargs):
+            elapsed = time.time() - last["ts"]
+            if elapsed < interval:
+                time.sleep(interval - elapsed)
+            result = fn(*args, **kwargs)
+            last["ts"] = time.time()
+            return result
+        return wrapped
+    return decorator
 
 
 class Command(BaseCommand):
@@ -21,22 +41,30 @@ class Command(BaseCommand):
     def handle(self, *args, **kwargs):
         token   = config("OPENSOLAR_API_TOKEN")
         org_id  = config("OPENSOLAR_ORG_ID")
-        base    = f"https://api.opensolar.com/api/orgs/{org_id}"
-        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        self.base   = f"https://api.opensolar.com/api/orgs/{org_id}"
+        self.headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
 
         try:
-            # 1) pull down all projects
-            resp = requests.get(f"{base}/projects/", headers=headers)
-            resp.raise_for_status()
-            projects = resp.json()
+            # 1) pull down *all* projects in pages of 20
+            projects = []
+            page, limit = 1, 20
+            while True:
+                batch = self.fetch_projects(page, limit)
+                if not batch:
+                    break
+                projects.extend(batch)
+                page += 1
+
+            self.stdout.write(f"\n🔎  {len(projects)} OpenSolar projects fetched\n")
 
             for proj in projects:
                 pid = proj["id"]
 
-                # 2) fetch project detail (for share_link + proposals)
-                full = requests.get(f"{base}/projects/{pid}/", headers=headers)
-                full.raise_for_status()
-                full_data  = full.json()
+                # 2) fetch project detail (share_link + proposals)
+                full_data  = self.fetch_project_detail(pid)
                 share_link = full_data.get("share_link", "")
 
                 # 3) sync customer
@@ -56,7 +84,7 @@ class Command(BaseCommand):
                         },
                     )
                 else:
-                    print(f"⚠️  No customer on {proj.get('title')}")
+                    self.stdout.write(f"⚠️  No customer on project #{pid} '{proj.get('title')}'")
 
                 # 4) upsert OpenSolarProject
                 project_obj, _ = OpenSolarProject.objects.update_or_create(
@@ -88,22 +116,9 @@ class Command(BaseCommand):
                     )
 
                 # 6) fetch the full systems/details payload
-                #    limit_to_sold=True so only sold systems,
-                #    include only modules,inverters,batteries
-                params = {
-                    "limit_to_sold": True,
-                    "include_parts": "modules,inverters,batteries",
-                }
-                det = requests.get(
-                    f"{base}/projects/{pid}/systems/details/",
-                    headers=headers,
-                    params=params
-                )
-                det.raise_for_status()
-                detail_data = det.json().get("systems", [])
-
-                if not detail_data:
-                    print(f"⚠️  No detailed system info for {project_obj.name}")
+                det = self.fetch_systems(pid)
+                if not det:
+                    self.stdout.write(f"⚠️  No detailed system info for '{project_obj.name}'")
                     continue
 
                 # clear out old child records
@@ -112,12 +127,13 @@ class Command(BaseCommand):
                 project_obj.batteries.all().delete()
 
                 # process each returned system
-                for system in detail_data:
+                for system in det:
                     # update summary fields once per system (last one wins)
                     if project_obj.price is None:
                         price_inc = system.get("price_including_tax")
                         if price_inc is not None:
                             project_obj.price = price_inc
+
                     project_obj.system_size_kw    = system.get("kw_stc")
                     project_obj.battery_size_kwh  = system.get("battery_total_kwh")
                     project_obj.system_output_kwh = system.get("output_annual_kwh")
@@ -126,7 +142,7 @@ class Command(BaseCommand):
                     # sync modules
                     module_qty_total = 0
                     for m in system.get("modules", []):
-                        qty = m.get("quantity", 0)
+                        qty = m.get("quantity", 0) or 0
                         module_qty_total += qty
                         OpenSolarModule.objects.create(
                             project=project_obj,
@@ -160,10 +176,10 @@ class Command(BaseCommand):
                             project=project_obj,
                             manufacturer_name=b.get("manufacturer_name", ""),
                             code=b.get("code", ""),
-                            quantity=b.get("quantity", 0),
+                            quantity=b.get("quantity", 0) or 0,
                         )
 
-                print(f"✅  Synced full system for {project_obj.name}")
+                self.stdout.write(f"✅  Synced full system for '{project_obj.name}'")
 
             self.stdout.write(self.style.SUCCESS(f"✅  Synced {len(projects)} OpenSolar projects."))
 
@@ -173,3 +189,38 @@ class Command(BaseCommand):
         except Exception as e:
             self.stderr.write(self.style.ERROR(f"❌  General Sync Error: {e}"))
             traceback.print_exc()
+
+    # ─── paged / throttled fetchers ─────────────────────────────────────────
+
+    @rate_limiter(100)   # ≤100/min for project list
+    def fetch_projects(self, page, limit):
+        resp = requests.get(
+            f"{self.base}/projects/",
+            headers=self.headers,
+            params={"page": page, "limit": limit}
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    @rate_limiter(100)   # ≤100/min for project detail
+    def fetch_project_detail(self, project_id):
+        resp = requests.get(
+            f"{self.base}/projects/{project_id}/",
+            headers=self.headers
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    @rate_limiter(60)    # ≤60/min for systems/details
+    def fetch_systems(self, project_id):
+        params = {
+            "limit_to_sold": True,
+            "include_parts": "modules,inverters,batteries",
+        }
+        resp = requests.get(
+            f"{self.base}/projects/{project_id}/systems/details/",
+            headers=self.headers,
+            params=params
+        )
+        resp.raise_for_status()
+        return resp.json().get("systems", [])
