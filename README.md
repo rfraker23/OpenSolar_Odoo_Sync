@@ -117,14 +117,6 @@ Trigger: Daily or Hourly as desired.
 
 Action:
 
-Program/script:
-
-makefile
-Copy
-Edit
-C:\Users\seadmin\OpenSolarOdooAPI\venv\Scripts\python.exe
-Add arguments:
-
 Copy
 Edit
 manage.py sync_all
@@ -161,9 +153,6 @@ x_studio_inverter_qty	First inverter quantity
 x_studio_battery_manufacturer_name	First battery manufacturer
 x_studio_battery_type	First battery code
 x_studio_battery_quantity	First battery quantity
-
-📜 License
-This project is released under the MIT License. See LICENSE for details.
 
 🤝 Contributing
 Fork the repo
