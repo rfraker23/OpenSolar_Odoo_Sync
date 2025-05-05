@@ -28,7 +28,7 @@ class Command(BaseCommand):
         }
 
         # ─── Pagination & Throttle Settings ──────────────────────────────────────
-        PAGE_SIZE      = 50             # try bumping above the default 20
+        PAGE_SIZE      = 40             # try bumping above the default 20
         offset         = 0
         last_get       = 0.0            # timestamp of last GET
         GET_DELAY      = 1.0            # seconds between GETs   (60/min)
