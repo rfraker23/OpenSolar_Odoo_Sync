@@ -101,6 +101,8 @@ class Command(BaseCommand):
                             "created_at":   proj.get("created_date"),
                             "project_type": "Residential" if proj.get("is_residential") else "Commercial",
                             "share_link":   share_link,
+                            "price_including_tax": full_data.get("price_including_tax", 0.0),  # Added this line
+                            "price_excluding_tax": full_data.get("price_excluding_tax", 0.0),  # Added this line
                         },
                     )
 
@@ -154,7 +156,8 @@ class Command(BaseCommand):
                         project_obj.system_output_kwh = sys.get("output_annual_kwh")
                         throttle(last_update, UPDATE_DELAY)
                         project_obj.save()
-                        last_update = time.time()
+                        last_update = time.time()                      
+                        
 
                         # modules
                         total_mod_qty = 0
