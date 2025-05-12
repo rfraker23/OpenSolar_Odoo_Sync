@@ -1,5 +1,3 @@
-# api/management/commands/sync_opensolar.py
-
 import time
 import json
 import traceback
@@ -28,13 +26,13 @@ class Command(BaseCommand):
         }
 
         # ─── Pagination & Throttle Settings ──────────────────────────────────────
-        PAGE_SIZE      = 40             # try bumping above the default 20
-        offset         = 0
-        last_get       = 0.0            # timestamp of last GET
-        GET_DELAY      = 1.0            # seconds between GETs   (60/min)
+        PAGE_SIZE      = 20             # Number of projects per request
+        page           = 1              # Start from the first page
+        last_get       = 0.0            # timestamp of last GET request
+        GET_DELAY      = 0.6            # Delay between GET requests to respect rate limits
         last_update    = 0.0            # timestamp of last ORM update
-        UPDATE_DELAY   = 6.0            # seconds between updates (10/min)
-        total_synced   = 0
+        UPDATE_DELAY   = 1.0            # Delay between system updates to respect rate limits
+        total_synced   = 0              # Track the total number of projects synced
 
         def throttle(last_time, delay):
             """
@@ -51,13 +49,27 @@ class Command(BaseCommand):
                 resp = requests.get(
                     f"{base}/projects/",
                     headers=headers,
-                    params={"limit": PAGE_SIZE, "offset": offset},
+                    params={"limit": PAGE_SIZE, "page": page},
                 )
-                resp.raise_for_status()
+                resp.raise_for_status()  # Raise exception for bad responses
                 last_get = time.time()
 
-                projects = resp.json()  # assume a list
+                data = resp.json()
+
+                # Debugging output to inspect the structure of the response
+                print(f"Fetched data from page {page}: {data}")  # Inspect the entire response
+
+                if isinstance(data, list):  # If the response is a list of projects
+                    projects = data
+                elif isinstance(data, dict) and 'projects' in data:  # If the response contains a 'projects' key
+                    projects = data['projects']
+                else:
+                    print(f"Unexpected response format: {data}")
+                    break
+
+                print(f"Fetched {len(projects)} projects from page {page}")  # Debugging output
                 if not projects:
+                    print("No more projects to fetch.")
                     break
 
                 # ─── Sync each project on this page ───────────────────────────────
@@ -68,16 +80,15 @@ class Command(BaseCommand):
                     throttle(last_get, GET_DELAY)
                     full = requests.get(f"{base}/projects/{pid}/", headers=headers)
                     full.raise_for_status()
-                    last_get  = time.time()
+                    last_get = time.time()
                     full_data = full.json()
                     share_link = full_data.get("share_link", "")
 
-                    # — upsert customer —
-                    contact = (proj.get("contacts_data") or [{}])[0]
-                    customer = None
+                    # — upsert customer — (using the customer's external_id)
+                    contact = (proj.get("contacts_data") or [{}])[0]  # Use first contact or an empty dict
                     if contact.get("id"):
                         customer, _ = OpenSolarCustomer.objects.update_or_create(
-                            external_id=contact["id"],
+                            external_id=contact["id"],  # Use contact ID for the customer
                             defaults={
                                 "name":    contact.get("display") or "No Name",
                                 "email":   contact.get("email", ""),
@@ -90,23 +101,23 @@ class Command(BaseCommand):
                         )
                     else:
                         print(f"⚠️ No customer on project {pid}")
+                        # Optionally, create a default customer or skip the project
+                        customer = None  # Assign a default customer or handle as per your logic
 
-                    # — upsert project header —
+                    # — upsert project header — (using the project's external_id)
                     project_obj, _ = OpenSolarProject.objects.update_or_create(
-                        external_id=pid,
+                        external_id=pid,  # Use project ID for the project
                         defaults={
                             "name":         proj.get("title", ""),
                             "status":       str(proj.get("stage", "")),
-                            "customer":     customer,
+                            "customer":     customer,  # Link customer to the project
                             "created_at":   proj.get("created_date"),
                             "project_type": "Residential" if proj.get("is_residential") else "Commercial",
                             "share_link":   share_link,
-                            "price_including_tax": full_data.get("price_including_tax", 0.0),  # Added this line
-                            "price_excluding_tax": full_data.get("price_excluding_tax", 0.0),  # Added this line
                         },
                     )
 
-                    # — sync proposals —
+                    # ─── sync proposals — (same as before)
                     for prop in full_data.get("proposals", []):
                         OpenSolarProposal.objects.update_or_create(
                             external_id=prop.get("id"),
@@ -117,94 +128,82 @@ class Command(BaseCommand):
                                 "created_at":         prop.get("created_at"),
                                 "system_size_kw":     prop.get("kw_stc"),
                                 "system_output_kwh":  prop.get("output_annual_kwh"),
-                                "price":              prop.get("price_excluding_tax"),
+                                "price":              prop.get("price_including_tax"),
                                 "battery_size_kwh":   prop.get("battery_total_kwh"),
                             }
                         )
 
-                    # — fetch & sync detailed systems payload —
-                    throttle(last_get, GET_DELAY)
-                    det = requests.get(
-                        f"{base}/projects/{pid}/systems/details/",
+                    # ─── Fetch & Sync Detailed Systems Payload ─────────────────────────────────
+                    throttle(last_get, GET_DELAY)  # Delay for system details (60/min)
+                    # Fetch the system details for the project
+                    systems_resp = requests.get(
+                        f"{base}/systems/",
                         headers=headers,
-                        params={
-                            "limit_to_sold": True,
-                            "include_parts": "modules,inverters,batteries",
-                        },
+                        params={"project": pid, "fieldset": "list", "page": 1, "limit": 1}  # Fetch a single system
                     )
-                    det.raise_for_status()
-                    last_get = time.time()
-                    systems = det.json().get("systems", [])
-                    if not systems:
-                        print(f"⚠️ No detailed system info for {project_obj.name}")
-                        continue
+                    systems_resp.raise_for_status()
+                    systems_data = systems_resp.json()
 
-                    # clear old children
-                    project_obj.modules.all().delete()
-                    project_obj.inverters.all().delete()
-                    project_obj.batteries.all().delete()
+                    # Debugging output to inspect the system data
+                    print(f"Fetched system details for project {pid}: {systems_data}")  # Debugging output
 
-                    # process each system
-                    for sys in systems:
-                        # update summary fields once (last one wins)
-                        if project_obj.price is None:
-                            price_inc = sys.get("price_including_tax")
-                            if price_inc is not None:
-                                project_obj.price = price_inc
-                        project_obj.system_size_kw    = sys.get("kw_stc")
-                        project_obj.battery_size_kwh  = sys.get("battery_total_kwh")
-                        project_obj.system_output_kwh = sys.get("output_annual_kwh")
-                        throttle(last_update, UPDATE_DELAY)
-                        project_obj.save()
-                        last_update = time.time()                      
-                        
+                    if systems_data:
+                        for system in systems_data:
+                            # First attempt: Extract the price_including_tax from system data
+                            price_including_tax = system.get("price_including_tax", None)
 
-                        # modules
-                        total_mod_qty = 0
-                        for m in sys.get("modules", []):
-                            qty = m.get("quantity", 0)
-                            total_mod_qty += qty
-                            OpenSolarModule.objects.create(
-                                project=project_obj,
-                                manufacturer_name=m.get("manufacturer_name",""),
-                                code=m.get("code",""),
-                                quantity=qty,
-                            )
+                            if price_including_tax:
+                                # If the price is available in the system, update the project price
+                                project_obj.price_including_tax = price_including_tax
+                                print(f"✅ Price updated for project {project_obj.name}: {price_including_tax}")
+                            else:
+                                # Fallback: If no price in system, check proposals
+                                print(f"⚠️ No price found in system, checking proposals for project {project_obj.name}.")
+                                for prop in full_data.get("proposals", []):
+                                    price_from_proposal = prop.get("price_including_tax", None)
+                                    if price_from_proposal:
+                                        project_obj.price_including_tax = price_from_proposal
+                                        print(f"✅ Price updated for project {project_obj.name} from proposal: {price_from_proposal}")
+                                        break  # Stop once we find a price in the proposals
 
-                        # inverters (with microinverter override)
-                        for inv in sys.get("inverters", []):
-                            qty = inv.get("quantity") or 0
-                            data = inv.get("data")
-                            if data:
-                                try:
-                                    dj = json.loads(data)
-                                    if dj.get("microinverter") == "Y":
-                                        qty = total_mod_qty
-                                except json.JSONDecodeError:
-                                    pass
-                            OpenSolarInverter.objects.create(
-                                project=project_obj,
-                                manufacturer_name=inv.get("manufacturer_name",""),
-                                code=inv.get("code",""),
-                                quantity=qty,
-                            )
+                            project_obj.save()  # Save the updated project
 
-                        # batteries
-                        for b in sys.get("batteries", []):
-                            OpenSolarBattery.objects.create(
-                                project=project_obj,
-                                manufacturer_name=b.get("manufacturer_name",""),
-                                code=b.get("code",""),
-                                quantity=b.get("quantity",0),
-                            )
+                            # Process modules, inverters, and batteries
+                            total_mod_qty = 0
+                            for m in system.get("modules", []):
+                                OpenSolarModule.objects.create(
+                                    project=project_obj,
+                                    manufacturer_name=m.get("manufacturer_name", ""),
+                                    code=m.get("code", ""),
+                                    quantity=m.get("quantity", 0),
+                                )
 
-                    print(f"✅ Synced full system for {project_obj.name}")
-                    total_synced += 1
+                            for inv in system.get("inverters", []):
+                                OpenSolarInverter.objects.create(
+                                    project=project_obj,
+                                    manufacturer_name=inv.get("manufacturer_name", ""),
+                                    code=inv.get("code", ""),
+                                    quantity=inv.get("quantity", 0),
+                                )
 
-                # ─── advance & exit if last page was partial ───────────────────────
-                offset += PAGE_SIZE
-                if len(projects) < PAGE_SIZE:
+                            for b in system.get("batteries", []):
+                                OpenSolarBattery.objects.create(
+                                    project=project_obj,
+                                    manufacturer_name=b.get("manufacturer_name", ""),
+                                    code=b.get("code", ""),
+                                    quantity=b.get("quantity", 0),
+                                )
+
+                            print(f"✅ Synced system for {project_obj.name}")
+
+                        total_synced += 1
+
+                # ─── Check if last page was fetched ───────────────────────
+                if len(projects) < PAGE_SIZE:  # If fewer projects than the PAGE_SIZE, it’s the last page
+                    print(f"Last page reached. Total projects synced: {total_synced}")
                     break
+                
+                page += 1  # Increment page number to fetch the next set of projects
 
             # ─── final report ─────────────────────────────────────────────────────
             self.stdout.write(self.style.SUCCESS(

@@ -14,15 +14,15 @@ class OpenSolarProposalInline(admin.TabularInline):
 
 @admin.register(OpenSolarProject)
 class OpenSolarProjectAdmin(admin.ModelAdmin):
-    list_display = ('name', 'external_id', 'status', 'customer', 'created_at')
+    list_display = ('name', 'external_id', 'status', 'customer', 'created_at', 'price_including_tax')  # Display only 'price_including_tax'
     search_fields = ('name', 'external_id')
-
+    list_per_page = 50  # Set the number of records per page here (adjust as needed)
+    exclude = ('price', 'price_excluding_tax')  # Exclude 'price' and 'price_excluding_tax' from the form
 
 @admin.register(OpenSolarCustomer)
 class OpenSolarCustomerAdmin(admin.ModelAdmin):
     list_display = ('name', 'email', 'phone')
     search_fields = ('name', 'email')
-    
 
 @admin.register(OpenSolarModule)
 class OpenSolarModuleAdmin(admin.ModelAdmin):
@@ -33,7 +33,6 @@ class OpenSolarModuleAdmin(admin.ModelAdmin):
         return obj.project.name
     get_project.short_description = 'Project'
 
-
 @admin.register(OpenSolarInverter)
 class OpenSolarInverterAdmin(admin.ModelAdmin):
     list_display = ('code', 'manufacturer_name', 'quantity', 'get_project')
@@ -42,7 +41,6 @@ class OpenSolarInverterAdmin(admin.ModelAdmin):
     def get_project(self, obj):
         return obj.project.name
     get_project.short_description = 'Project'
-
 
 @admin.register(OpenSolarBattery)
 class OpenSolarBatteryAdmin(admin.ModelAdmin):
