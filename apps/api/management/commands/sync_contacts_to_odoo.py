@@ -1,5 +1,5 @@
 from django.core.management.base import BaseCommand
-from api.models import OpenSolarCustomer
+from apps.api.models import OpenSolarCustomer
 import requests
 import json
 from decouple import config

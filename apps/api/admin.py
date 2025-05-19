@@ -1,5 +1,5 @@
 from django.contrib import admin
-from api.models import (
+from apps.api.models import (
     OpenSolarProject,
     OpenSolarCustomer,
     OpenSolarProposal,

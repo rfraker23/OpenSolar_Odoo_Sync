@@ -43,7 +43,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
-    'api',  # Your custom app for OpenSolar integration
+    'apps.api',  
 ]
 
 MIDDLEWARE = [
@@ -56,7 +56,7 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-ROOT_URLCONF = 'my_django_project.urls'
+ROOT_URLCONF = 'opensolar_sync.urls'
 
 TEMPLATES = [
     {
@@ -73,7 +73,7 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = 'my_django_project.wsgi.application'
+WSGI_APPLICATION = 'opensolar_sync.wsgi.application'
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
