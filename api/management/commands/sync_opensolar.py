@@ -1,3 +1,5 @@
+#api/management/commands/sync_opensolar.py
+
 import time
 import json
 import traceback
