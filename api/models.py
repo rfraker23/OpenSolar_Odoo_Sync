@@ -25,6 +25,8 @@ class OpenSolarProject(models.Model):
     system_size_kw = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
     system_output_kwh = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
     price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    price_excluding_tax = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    price_including_tax = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     battery_size_kwh = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
     share_link = models.URLField(null=True, blank=True)
 

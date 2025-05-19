@@ -1,5 +1,3 @@
-# api/management/commands/sync_projects_to_odoo.py
-
 from django.core.management.base import BaseCommand
 from api.models import OpenSolarProject
 import requests
@@ -52,14 +50,14 @@ class Command(BaseCommand):
 
             ext_id   = int(proj.external_id)
             share    = proj.share_link or ""
-            price    = float(proj.price or 0.0)
+            price    = float(proj.price_including_tax or 0.0)  # Ensure using price_including_tax
             sys_size = float(proj.system_size_kw or 0.0)
             cust     = proj.customer
 
             self.stdout.write(
                 f"➡️  OS#{ext_id} – customer: {cust.name}\n"
                 f"   🔗 share_link: {share!r}\n"
-                f"   💲 price:      {price!r}\n"
+                f"   💲 price (including tax): {price!r}\n"  # Display the price (including tax)
                 f"   📏 sys_size:   {sys_size!r}"
             )
 
@@ -67,14 +65,14 @@ class Command(BaseCommand):
                 self.stdout.write("   ‼️  SKIP: no share_link\n\n")
                 continue
 
-            # ─── Find or skip partner in Odoo
+            # ─── Find or skip partner in Odoo (Map customer contact using external_id)
             partner = self._search_read(
                 uid, "res.partner",
                 ["|",
-                    [F_EXT_ID, "=", ext_id],
+                    [F_EXT_ID, "=", cust.external_id],  # Use customer external_id
                     ["email", "=", cust.email or False],
                 ],
-                ["id","name"]
+                ["id", "name"]
             )
             if not partner:
                 self.stderr.write(
@@ -91,9 +89,12 @@ class Command(BaseCommand):
                 F_PARTNER:  pid,
                 F_EXT_ID:   ext_id,
                 F_PROPOSAL: share,
-                F_VALUE:    price,
-                F_CHANGE:   price,
                 F_SYS_SIZE: sys_size,
+
+                # Map price_including_tax to both value and change fields
+                F_VALUE:    price,  # This is for the x_studio_value field (monetary field)
+                F_CHANGE:   price,  # This is for the x_studio_change_order_price field (monetary field)
+                "x_studio_open_solar_project_id": ext_id  # Correct field name here
             }
 
             # ─── Flatten first Module
@@ -125,7 +126,7 @@ class Command(BaseCommand):
 
             self.stdout.write(f"   [DEBUG] payload → {vals}")
 
-            # ─── Dedupe on (external_id, customer_name)
+            # ─── Dedupe on (external_id, customer_name) for the project
             existing = self._search_read(
                 uid, "x_projects",
                 ["|",
@@ -148,7 +149,6 @@ class Command(BaseCommand):
             self.stdout.write("")  # blank line
 
         self.stdout.write(self.style.SUCCESS("✅ Full sync complete\n"))
-
 
     # ─── JSON-RPC helpers ────────────────────────────────────────────────────
     def _rpc(self, payload):

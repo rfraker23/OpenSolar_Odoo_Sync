@@ -11,7 +11,6 @@ ODOO_PASSWORD = config("ODOO_API_TOKEN")
 
 ODOO_RPC = f"{ODOO_URL}/jsonrpc"
 
-
 class Command(BaseCommand):
     help = 'Sync OpenSolar customers to Odoo as contacts'
 
@@ -44,7 +43,7 @@ class Command(BaseCommand):
                         "zip": zip_code,
                         "state_id": state_id,
                         "country_id": country_id,
-                        "x_studio_opensolar_external_id": int(external_id)
+                        "x_studio_opensolar_external_id": int(external_id)  # Syncing the external_id
                     }
 
                     # Dedupe by external ID OR email
