@@ -99,6 +99,7 @@ class Command(BaseCommand):
                     else:
                         print(f"⚠️ No customer on project {pid}")
                         customer = None
+                                  
 
                     # — upsert project header —
                     project_obj, _ = OpenSolarProject.objects.update_or_create(
@@ -112,6 +113,11 @@ class Command(BaseCommand):
                             "share_link":   share_link,
                         },
                     )
+                    
+                     # ─── CLEAR ALL OLD PARTS ────────────────────────────────────────────
+                    project_obj.modules.all().delete()
+                    project_obj.inverters.all().delete()
+                    project_obj.batteries.all().delete()
 
                     # — sync proposals —
                     for prop in full_data.get("proposals", []):
