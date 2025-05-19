@@ -68,7 +68,7 @@ Project Structure
 bash
 Copy
 Edit
-OpenSolar_Odoo_Sync/
+"OpenSolar_Odoo_Sync/
 ├── apps/
 │   └── api/                # Main Django app for OpenSolar/Odoo integration
 │       ├── management/
@@ -88,44 +88,8 @@ OpenSolar_Odoo_Sync/
 ├── .gitignore
 └── manage.py
 Contributing
-Pull requests, bug reports, and feature requests are welcome. Please open an issue to discuss your proposal.
-
-License
-This project is licensed under the MIT License. See LICENSE for details.
+Pull requests, bug reports, and feature requests are welcome. Please open an issue to discuss your proposal."
 
 Author
 Fraker — GitHub Profile
 
-yaml
-Copy
-Edit
-
----
-
-## **How to Add This README**
-
-### **From VS Code**
-
-1. In the root of your project, right-click and choose **New File**, name it `README.md`.
-2. Copy and paste the above contents into the file and save.
-
-### **From the Terminal**
-
-1. Run:
-   ```bash
-   nano README.md
-Or open with Notepad if on Windows:
-
-powershell
-Copy
-Edit
-notepad README.md
-Paste the contents and save the file.
-
-Commit and Push to GitHub
-bash
-Copy
-Edit
-git add README.md
-git commit -m "Add project README"
-git push origin main
