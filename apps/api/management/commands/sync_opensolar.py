@@ -31,9 +31,7 @@ class Command(BaseCommand):
         PAGE_SIZE      = 20             # Number of projects per request
         page           = 1              # Start from the first page
         last_get       = 0.0            # timestamp of last GET request
-        GET_DELAY      = 0.6            # Delay between GET requests to respect rate limits
-        last_update    = 0.0            # timestamp of last ORM update
-        UPDATE_DELAY   = 1.0            # Delay between system updates to respect rate limits
+        GET_DELAY      = 1.0            # Delay between GET requests to respect rate limits
         total_synced   = 0              # Track the total number of projects synced
 
         def throttle(last_time, delay):
@@ -55,8 +53,24 @@ class Command(BaseCommand):
                 )
                 resp.raise_for_status()
                 last_get = time.time()
-
                 data = resp.json()
+                # throttle and fetch page
+                throttle(last_get, GET_DELAY)
+                try:
+                    resp = requests.get(
+                        f"{base}/projects/",
+                        headers=headers,
+                        params={"limit": PAGE_SIZE, "page": page},
+                    )
+                    resp.raise_for_status()
+                except requests.exceptions.HTTPError as e:
+                    # skip this page on 500
+                    print(f"⚠️  Server error on page {page}: {e}. Skipping.")
+                    page += 1
+                    continue
+                last_get = time.time()
+                data = resp.json()
+                
                 print(f"Fetched data from page {page}: {data}")
 
                 if isinstance(data, list):
@@ -65,6 +79,15 @@ class Command(BaseCommand):
                     projects = data['projects']
                 else:
                     print(f"Unexpected response format: {data}")
+                    break
+
+                # ─── normalize projects list ─────────────────────────────────────────────
+                if isinstance(data, dict) and "projects" in data:
+                    projects = data["projects"]
+                elif isinstance(data, list):
+                    projects = data
+                else:
+                    print(f"Unexpected response format on page {page}: {data}")
                     break
 
                 print(f"Fetched {len(projects)} projects from page {page}")
@@ -241,10 +264,11 @@ class Command(BaseCommand):
                             print(f"✅ Synced system for {project_obj.name}")
                             total_synced += 1
 
-                if len(projects) < PAGE_SIZE:
-                    print(f"Last page reached. Total projects synced: {total_synced}")
-                    break
-                page += 1
+                            if not projects:
+                                print("No more projects to fetch.")
+                                break
+                            page += 1
+
 
             self.stdout.write(self.style.SUCCESS(
                 f"✅ Synced {total_synced} OpenSolar projects (paged in {PAGE_SIZE} chunks)."
