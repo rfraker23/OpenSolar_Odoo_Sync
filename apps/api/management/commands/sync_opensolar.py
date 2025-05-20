@@ -1,4 +1,4 @@
-#api/management/commands/sync_opensolar.py
+# api/management/commands/sync_opensolar.py
 
 import time
 import json
@@ -14,6 +14,7 @@ from apps.api.models import (
     OpenSolarInverter,
     OpenSolarBattery,
 )
+import math
 
 class Command(BaseCommand):
     help = 'Sync projects, customers, proposals, and full system details from OpenSolar'
@@ -27,82 +28,113 @@ class Command(BaseCommand):
             "Content-Type": "application/json",
         }
 
-        # ─── Pagination & Throttle Settings ──────────────────────────────────────
         PAGE_SIZE      = 20             # Number of projects per request
         page           = 1              # Start from the first page
         last_get       = 0.0            # timestamp of last GET request
-        GET_DELAY      = 1.0            # Delay between GET requests to respect rate limits
-        total_synced   = 0              # Track the total number of projects synced
+        GET_DELAY      = 1.0            # seconds between calls
+        total_synced   = 0
+        total_projects = None           # Will try to grab from first page if possible
 
         def throttle(last_time, delay):
-            """
-            Sleep just enough so that (now - last_time) >= delay
-            """
+            """Sleep so that at least `delay` seconds has passed since last_time."""
             delta = time.time() - last_time
             if delta < delay:
                 time.sleep(delay - delta)
 
         try:
-            # ─── Loop through pages of projects ───────────────────────────────────
             while True:
                 throttle(last_get, GET_DELAY)
-                resp = requests.get(
-                    f"{base}/projects/",
-                    headers=headers,
-                    params={"limit": PAGE_SIZE, "page": page},
-                )
-                resp.raise_for_status()
-                last_get = time.time()
-                data = resp.json()
-                # throttle and fetch page
-                throttle(last_get, GET_DELAY)
-                try:
-                    resp = requests.get(
-                        f"{base}/projects/",
-                        headers=headers,
-                        params={"limit": PAGE_SIZE, "page": page},
-                    )
-                    resp.raise_for_status()
-                except requests.exceptions.HTTPError as e:
-                    # skip this page on 500
-                    print(f"⚠️  Server error on page {page}: {e}. Skipping.")
-                    page += 1
-                    continue
-                last_get = time.time()
-                data = resp.json()
-                
-                print(f"Fetched data from page {page}: {data}")
+                projects_url = f"{base}/projects/"
+                params = {"limit": PAGE_SIZE, "page": page}
+                max_retries = 3
+                backoff = GET_DELAY
 
-                if isinstance(data, list):
-                    projects = data
-                elif isinstance(data, dict) and 'projects' in data:
-                    projects = data['projects']
-                else:
-                    print(f"Unexpected response format: {data}")
-                    break
+                got_data = False
+                for attempt in range(max_retries):
+                    try:
+                        resp = requests.get(projects_url, headers=headers, params=params)
+                        resp.raise_for_status()
+                        last_get = time.time()
+                        got_data = True
+                        break
+                    except requests.exceptions.HTTPError as e:
+                        status = getattr(resp, 'status_code', None)
+                        if status == 404 or status == 500:
+                            self.stdout.write(self.style.WARNING(
+                                f"❌ No more pages or server error after last page (page {page}): {e}. Stopping sync."
+                            ))
+                            return  # Exit the command cleanly
+                        else:
+                            self.stdout.write(self.style.WARNING(
+                                f"⚠️ HTTP error on page {page}: {e}, retrying in {backoff}s"
+                            ))
+                            time.sleep(backoff)
+                            backoff *= 2
+                if not got_data:
+                    self.stdout.write(self.style.WARNING(
+                        f"❌ Max retries exceeded for page {page}. Stopping sync."
+                    ))
+                    return
 
-                # ─── normalize projects list ─────────────────────────────────────────────
+                data = resp.json()
+
+                # Try to grab total project count from first page
+                if total_projects is None and isinstance(data, dict) and "count" in data:
+                    total_projects = data["count"]
+                    max_pages = math.ceil(total_projects / PAGE_SIZE)
+                    self.stdout.write(self.style.NOTICE(
+                        f"Total projects: {total_projects}. Expecting up to {max_pages} pages."
+                    ))
+
                 if isinstance(data, dict) and "projects" in data:
                     projects = data["projects"]
                 elif isinstance(data, list):
                     projects = data
                 else:
-                    print(f"Unexpected response format on page {page}: {data}")
+                    self.stdout.write(self.style.WARNING(
+                        f"Unexpected response format: {data}"
+                    ))
                     break
 
-                print(f"Fetched {len(projects)} projects from page {page}")
                 if not projects:
-                    print("No more projects to fetch.")
+                    self.stdout.write(self.style.SUCCESS(
+                        f"✅ No more projects found (empty page {page}). Stopping sync."
+                    ))
                     break
+
+                self.stdout.write(f"Fetched {len(projects)} projects from page {page}")
 
                 for proj in projects:
                     pid = proj["id"]
 
                     # — fetch full project —
                     throttle(last_get, GET_DELAY)
-                    full = requests.get(f"{base}/projects/{pid}/", headers=headers)
-                    full.raise_for_status()
-                    last_get = time.time()
+                    proj_url = f"{base}/projects/{pid}/"
+                    for attempt in range(max_retries):
+                        try:
+                            full = requests.get(proj_url, headers=headers)
+                            full.raise_for_status()
+                            last_get = time.time()
+                            break
+                        except requests.exceptions.HTTPError as e:
+                            status = getattr(full, 'status_code', None)
+                            if status == 404 or status == 500:
+                                self.stdout.write(self.style.WARNING(
+                                    f"❌ No more detail or server error for project {pid}: {e}. Skipping project."
+                                ))
+                                continue
+                            else:
+                                self.stdout.write(self.style.WARNING(
+                                    f"⚠️ HTTP error on project {pid}: {e}, retrying in {backoff}s"
+                                ))
+                                time.sleep(backoff)
+                                backoff *= 2
+                    else:
+                        self.stdout.write(self.style.WARNING(
+                            f"❌ Max retries exceeded for project {pid}. Skipping."
+                        ))
+                        continue
+
                     full_data = full.json()
                     share_link = full_data.get("share_link", "")
 
@@ -122,9 +154,8 @@ class Command(BaseCommand):
                             },
                         )
                     else:
-                        print(f"⚠️ No customer on project {pid}")
+                        self.stdout.write(f"⚠️ No customer on project {pid}")
                         customer = None
-                                  
 
                     # — upsert project header —
                     project_obj, _ = OpenSolarProject.objects.update_or_create(
@@ -138,8 +169,8 @@ class Command(BaseCommand):
                             "share_link":   share_link,
                         },
                     )
-                    
-                     # ─── CLEAR ALL OLD PARTS ────────────────────────────────────────────
+
+                    # — clear old parts —
                     project_obj.modules.all().delete()
                     project_obj.inverters.all().delete()
                     project_obj.batteries.all().delete()
@@ -162,113 +193,120 @@ class Command(BaseCommand):
 
                     # — fetch & sync detailed systems payload —
                     throttle(last_get, GET_DELAY)
-                    systems_resp = requests.get(
-                        f"{base}/systems/",
-                        headers=headers,
-                        params={"project": pid, "fieldset": "list", "page": 1, "limit": 1},
-                    )
-                    systems_resp.raise_for_status()
-                    last_get = time.time()
-                    systems_data = systems_resp.json()
-
-                    print(f"Fetched system details for project {pid}: {systems_data}")
-
-                    if systems_data:
-                        for system in systems_data:
-                            # — update price —
-                            price_including_tax = system.get("price_including_tax")
-                            if price_including_tax is not None:
-                                project_obj.price_including_tax = price_including_tax
-                                print(f"✅ Price updated for project {project_obj.name}: {price_including_tax}")
+                    systems_url = f"{base}/systems/"
+                    params = {"project": pid, "fieldset": "list", "page": 1, "limit": 1}
+                    for attempt in range(max_retries):
+                        try:
+                            systems_resp = requests.get(systems_url, headers=headers, params=params)
+                            systems_resp.raise_for_status()
+                            last_get = time.time()
+                            break
+                        except requests.exceptions.HTTPError as e:
+                            status = getattr(systems_resp, 'status_code', None)
+                            if status == 404 or status == 500:
+                                self.stdout.write(self.style.WARNING(
+                                    f"❌ No system details or server error for project {pid}: {e}. Skipping system details."
+                                ))
+                                continue
                             else:
-                                print(f"⚠️ No price in system, checking proposals for {project_obj.name}")
-                                for prop in full_data.get("proposals", []):
-                                    pft = prop.get("price_including_tax")
-                                    if pft:
-                                        project_obj.price_including_tax = pft
-                                        print(f"✅ Price updated for project {project_obj.name} from proposal: {pft}")
-                                        break
-                                    
-                         # ← NEW: pull in system size, annual output and battery kWh
-                            project_obj.system_size_kw    = system.get("kw_stc")
-                            project_obj.system_output_kwh = system.get("output_annual_kwh")
-                            project_obj.battery_size_kwh  = system.get("battery_total_kwh")
-                            print(f"✅ System size for {project_obj.name}: {project_obj.system_size_kw} kW")            
-                            project_obj.save()
+                                self.stdout.write(self.style.WARNING(
+                                    f"⚠️ HTTP error on systems for project {pid}: {e}, retrying in {backoff}s"
+                                ))
+                                time.sleep(backoff)
+                                backoff *= 2
+                    else:
+                        self.stdout.write(self.style.WARNING(
+                            f"❌ Max retries exceeded for systems on project {pid}. Skipping."
+                        ))
+                        continue
 
-                        # Process modules, inverters, and batteries
+                    systems_data = systems_resp.json()
+                    if not systems_data:
+                        continue
+                    for system in systems_data:
+                        price_including_tax = system.get("price_including_tax")
+                        if price_including_tax is not None:
+                            project_obj.price_including_tax = price_including_tax
+                        else:
+                            for prop in full_data.get("proposals", []):
+                                pft = prop.get("price_including_tax")
+                                if pft:
+                                    project_obj.price_including_tax = pft
+                                    break
+
+                        project_obj.system_size_kw    = system.get("kw_stc")
+                        project_obj.system_output_kwh = system.get("output_annual_kwh")
+                        project_obj.battery_size_kwh  = system.get("battery_total_kwh")
+                        project_obj.save()
+
                         total_mod_qty = 0
                         for m in system.get("modules", []):
                             module_qty = m.get("quantity", 0)
                             total_mod_qty += module_qty
-                            # Check if module already exists for the project
-                            existing_module = OpenSolarModule.objects.filter(
+                            OpenSolarModule.objects.create(
                                 project=project_obj,
-                                code=m.get("code")
-                            ).first()
-                            if not existing_module:
-                                OpenSolarModule.objects.create(
-                                    project=project_obj,
-                                    manufacturer_name=m.get("manufacturer_name", ""),
-                                    code=m.get("code", ""),
-                                    quantity=module_qty,
-                                )
+                                manufacturer_name=m.get("manufacturer_name", ""),
+                                code=m.get("code", ""),
+                                quantity=module_qty,
+                            )
 
-                       # ─── Process inverters (with microinverter override) ─────────────────
                         for inv in system.get("inverters", []):
-                            # 1) start with whatever the system list payload gave you
                             qty = inv.get("quantity", 0) or 0
-
-                            # 2) pull the real activation ID
                             activation_id = inv.get("inverter_activation_id")
-                            self.stdout.write(f"🔍 Checking inverter activation ID: {activation_id}")
-
                             if activation_id:
                                 throttle(last_get, GET_DELAY)
-                                inv_resp = requests.get(
-                                    f"{base}/component_inverter_activations/{activation_id}/",
-                                    headers=headers
-                                )
-                                inv_resp.raise_for_status()
-                                last_get = time.time()
-                                inv_detail = inv_resp.json()
-                                self.stdout.write(f"  👉 activation detail: {inv_detail}")
+                                activation_url = f"{base}/component_inverter_activations/{activation_id}/"
+                                for attempt in range(max_retries):
+                                    try:
+                                        inv_resp = requests.get(activation_url, headers=headers)
+                                        inv_resp.raise_for_status()
+                                        last_get = time.time()
+                                        break
+                                    except requests.exceptions.HTTPError as e:
+                                        status = getattr(inv_resp, 'status_code', None)
+                                        if status == 404 or status == 500:
+                                            self.stdout.write(self.style.WARNING(
+                                                f"❌ No inverter detail or server error for activation {activation_id}: {e}. Skipping inverter."
+                                            ))
+                                            continue
+                                        else:
+                                            self.stdout.write(self.style.WARNING(
+                                                f"⚠️ HTTP error on inverter activation {activation_id}: {e}, retrying in {backoff}s"
+                                            ))
+                                            time.sleep(backoff)
+                                            backoff *= 2
+                                else:
+                                    self.stdout.write(self.style.WARNING(
+                                        f"❌ Max retries exceeded for inverter activation {activation_id}. Skipping."
+                                    ))
+                                    continue
 
-                                # 3) the payload’s "data" field is itself a JSON-encoded string
+                                inv_detail = inv_resp.json()
                                 data_blob = inv_detail.get("data")
                                 if data_blob:
                                     parsed = json.loads(data_blob)
-                                    self.stdout.write(f"     parsed.data → microinverter = {parsed.get('microinverter')}")
-                                    if str(parsed.get("microinverter","")).upper() == "Y":
+                                    if str(parsed.get("microinverter", "")).upper() == "Y":
                                         qty = total_mod_qty
-                                        self.stdout.write(f"✅ Microinverter override: setting qty to {qty}")
 
-                            # 4) finally, save or update the inverter record
                             OpenSolarInverter.objects.create(
                                 project=project_obj,
-                                manufacturer_name=inv.get("manufacturer_name",""),
-                                code=inv.get("code",""),
+                                manufacturer_name=inv.get("manufacturer_name", ""),
+                                code=inv.get("code", ""),
                                 quantity=qty,
                             )
 
-                            # — process batteries —
-                            for b in system.get("batteries", []):
-                                if not OpenSolarBattery.objects.filter(project=project_obj, code=b.get("code")).exists():
-                                    OpenSolarBattery.objects.create(
-                                        project=project_obj,
-                                        manufacturer_name=b.get("manufacturer_name", ""),
-                                        code=b.get("code", ""),
-                                        quantity=b.get("quantity", 0),
-                                    )
+                        for b in system.get("batteries", []):
+                            if not OpenSolarBattery.objects.filter(project=project_obj, code=b.get("code")).exists():
+                                OpenSolarBattery.objects.create(
+                                    project=project_obj,
+                                    manufacturer_name=b.get("manufacturer_name", ""),
+                                    code=b.get("code", ""),
+                                    quantity=b.get("quantity", 0),
+                                )
 
-                            print(f"✅ Synced system for {project_obj.name}")
-                            total_synced += 1
+                        total_synced += 1
 
-                            if not projects:
-                                print("No more projects to fetch.")
-                                break
-                            page += 1
-
+                page += 1
 
             self.stdout.write(self.style.SUCCESS(
                 f"✅ Synced {total_synced} OpenSolar projects (paged in {PAGE_SIZE} chunks)."
