@@ -16,15 +16,17 @@ ODOO_API_TOKEN = config("ODOO_API_TOKEN")
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Database Configuration
-# Get the database name (use test DB or live DB based on .env)
-DATABASE_NAME = config('DATABASE_NAME', default='sun-energy-partners-inc-test')  # Default to test DB
-
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',  # Path to the SQLite database file
+        'ENGINE':   'django.db.backends.postgresql',
+        'NAME':     config('DATABASE_NAME'),
+        'USER':     config('DATABASE_USER'),
+        'PASSWORD': config('DATABASE_PASSWORD'),
+        'HOST':     config('DATABASE_HOST', default='localhost'),
+        'PORT':     config('DATABASE_PORT', default='5432'),
     }
 }
+
 # Django security settings
 SECRET_KEY = config('SECRET_KEY', default='django-insecure-3$eaxf5sd$_$e$&7lo1!=2q0x$%z^fkibbut2+ikjea2hfiny(')
 
