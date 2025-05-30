@@ -2,7 +2,9 @@ from django.core.management.base import BaseCommand
 from apps.api.models import OpenSolarCustomer
 import requests
 import json
+
 from decouple import config
+
 
 ODOO_URL = config("ODOO_URL")
 ODOO_DB = config("ODOO_DB")

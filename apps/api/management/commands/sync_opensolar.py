@@ -1,5 +1,6 @@
 # api/management/commands/sync_opensolar.py
-
+import sys
+import io
 import time
 import json
 import traceback
@@ -14,6 +15,8 @@ from apps.api.models import (
     OpenSolarInverter,
     OpenSolarBattery,
 )
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 import math
 
 class Command(BaseCommand):
