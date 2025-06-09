@@ -63,7 +63,7 @@ class Command(BaseCommand):
                             self.stdout.write(self.style.WARNING(
                                 f"❌ No more pages or server error after last page (page {page}): {e}. Stopping sync."
                             ))
-                            return  # Exit the command cleanly
+                            return  
                         else:
                             self.stdout.write(self.style.WARNING(
                                 f"⚠️ HTTP error on page {page}: {e}, retrying in {backoff}s"
@@ -78,7 +78,6 @@ class Command(BaseCommand):
 
                 data = resp.json()
 
-                # Try to grab total project count from first page
                 if total_projects is None and isinstance(data, dict) and "count" in data:
                     total_projects = data["count"]
                     max_pages = math.ceil(total_projects / PAGE_SIZE)
@@ -107,7 +106,6 @@ class Command(BaseCommand):
                 for proj in projects:
                     pid = proj["id"]
 
-                    # — fetch full project —
                     throttle(last_get, GET_DELAY)
                     proj_url = f"{base}/projects/{pid}/"
                     for attempt in range(max_retries):
@@ -138,7 +136,6 @@ class Command(BaseCommand):
                     full_data = full.json()
                     share_link = full_data.get("share_link", "")
 
-                    # — upsert customer —
                     contact = (proj.get("contacts_data") or [{}])[0]
                     if contact.get("id"):
                         customer, _ = OpenSolarCustomer.objects.update_or_create(
@@ -157,7 +154,6 @@ class Command(BaseCommand):
                         self.stdout.write(f"⚠️ No customer on project {pid}")
                         customer = None
 
-                    # — upsert project header —
                     project_obj, _ = OpenSolarProject.objects.update_or_create(
                         external_id=pid,
                         defaults={
@@ -175,7 +171,6 @@ class Command(BaseCommand):
                     project_obj.inverters.all().delete()
                     project_obj.batteries.all().delete()
 
-                    # — sync proposals —
                     for prop in full_data.get("proposals", []):
                         OpenSolarProposal.objects.update_or_create(
                             external_id=prop.get("id"),
@@ -191,7 +186,6 @@ class Command(BaseCommand):
                             }
                         )
 
-                    # — fetch & sync detailed systems payload —
                     throttle(last_get, GET_DELAY)
                     systems_url = f"{base}/systems/"
                     params = {"project": pid, "fieldset": "list", "page": 1, "limit": 1}
