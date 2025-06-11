@@ -3,13 +3,6 @@ rem ─────────────────────────�
 rem Force Python 3 to use UTF-8 for stdout/stderr (equivalent to -X utf8).
 set PYTHONUTF8=1
 
-rem ─────────────────────────────────────────────────────────────────────────────
-rem  1) Define where logs live
-rem  2) Drop a “marker” so we know the batch actually started
-rem  3) Change directory to where manage.py lives
-rem  4) Run each Django command via the venv’s python (UTF-8 mode guaranteed)
-rem ─────────────────────────────────────────────────────────────────────────────
-
 set "LOGDIR=C:\Users\seadmin\OpenSolarOdooAPI\logs"
 if not exist "%LOGDIR%" mkdir "%LOGDIR%"
 
