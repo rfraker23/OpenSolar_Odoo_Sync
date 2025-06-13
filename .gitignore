@@ -1,23 +1,25 @@
-# Byte-compiled
+# Virtualenv created by VS Code or manually
+.venv/
+venv/
+
+# If you ever scaffolded Odoo here by mistake
+/odoo/
+/addons/
+/custom_addons/
+
+# CompanyCam client if generated in this repo
+/companycam_client/
+
+# Byte-compiled & caches (just in case)
 __pycache__/
 *.py[cod]
 
-# Virtualenv
-venv/
-
-# Django files
+# Logs & DB files
 *.log
-*.pot
-*.pyc
-*.pyo
+*.tmp
 *.db
 db.sqlite3
 
-# Environment settings
-.env
-
-# VSCode settings
+# IDE folders
 .vscode/
-
-# macOS
-.DS_Store
+.idea/
