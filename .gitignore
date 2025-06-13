@@ -23,3 +23,9 @@ db.sqlite3
 # IDE folders
 .vscode/
 .idea/
+
+# Django venv
+.venv/
+
+# Environment variable file
+.env
